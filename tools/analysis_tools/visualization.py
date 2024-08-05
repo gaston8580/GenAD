@@ -762,6 +762,7 @@ if __name__ == '__main__':
     sample_token_list = list(bevformer_results['results'].keys())
 
     nusc = NuScenes(version='v1.0-trainval', dataroot='./data/nuscenes', verbose=True)
+    # nusc = NuScenes(version='v1.0-mini', dataroot='./data/nuscenes', verbose=True)
     
     imgs = []
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')

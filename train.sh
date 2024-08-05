@@ -1,0 +1,1 @@
+python -m torch.distributed.run --nproc_per_node=2 --master_port=2333 tools/train.py projects/configs/VAD/GenAD_config.py --launcher pytorch --deterministic --work-dir outputs/all

@@ -37,8 +37,8 @@ warnings.filterwarnings("ignore")
 def parse_args():
     parser = argparse.ArgumentParser(
         description='MMDet test (and eval) a model')
-    parser.add_argument('config', help='test config file path')
-    parser.add_argument('checkpoint', help='checkpoint file')
+    parser.add_argument('--config', default='projects/configs/VAD/GenAD_config.py', help='test config file path')
+    parser.add_argument('--checkpoint', default='outputs/mini/latest.pth', help='checkpoint file')
     parser.add_argument('--json_dir', help='json parent dir name file') # NOTE: json file parent folder name
     parser.add_argument('--out', help='output result file in pickle format')
     parser.add_argument(
@@ -55,6 +55,7 @@ def parse_args():
     parser.add_argument(
         '--eval',
         type=str,
+        default='bbox',
         nargs='+',
         help='evaluation metrics, which depends on the dataset, e.g., "bbox",'
         ' "segm", "proposal" for COCO, and "mAP", "recall" for PASCAL VOC')
@@ -67,6 +68,7 @@ def parse_args():
         help='whether to use gpu to collect results.')
     parser.add_argument(
         '--tmpdir',
+        default='outputs',
         help='tmp directory used for collecting results from multiple '
         'workers, available when gpu-collect is not specified')
     parser.add_argument('--seed', type=int, default=0, help='random seed')
