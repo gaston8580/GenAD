@@ -372,15 +372,10 @@ class VAD(MVXTwoStageDetector):
         gt_attr_labels=None,
     ):
         """Test function"""
-        mapped_class_names = [
-            'car', 'truck', 'construction_vehicle', 'bus',
-            'trailer', 'barrier', 'motorcycle', 'bicycle', 
-            'pedestrian', 'traffic_cone'
-        ]
+        mapped_class_names = ['car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier', 'motorcycle', 
+                              'bicycle', 'pedestrian', 'traffic_cone']
 
-
-        outs = self.pts_bbox_head(x, img_metas, prev_bev=prev_bev,
-                                  ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
+        outs = self.pts_bbox_head(x, img_metas, prev_bev=prev_bev, ego_his_trajs=ego_his_trajs, ego_lcf_feat=ego_lcf_feat)
         bbox_list = self.pts_bbox_head.get_bboxes(outs, img_metas, rescale=rescale)
 
         bbox_results = []

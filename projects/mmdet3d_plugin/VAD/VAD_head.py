@@ -617,22 +617,20 @@ class VADHead(DETRHead):
                 Shape [nb_dec, bs, num_query, 9].
         """
 
-        bs, num_cam, _, _, _ = mlvl_feats[0].shape
+        bs, num_cam, _, _, _ = mlvl_feats[0].shape  # mlvl_feats: 多层特征图
         dtype = mlvl_feats[0].dtype
         object_query_embeds = self.query_embedding.weight.to(dtype)
 
         if self.map_query_embed_type == 'all_pts':
             map_query_embeds = self.map_query_embedding.weight.to(dtype)
         elif self.map_query_embed_type == 'instance_pts':
-            map_pts_embeds = self.map_pts_embedding.weight.unsqueeze(0)
-            map_instance_embeds = self.map_instance_embedding.weight.unsqueeze(1)
-            map_query_embeds = (map_pts_embeds + map_instance_embeds).flatten(0, 1).to(dtype)
+            map_pts_embeds = self.map_pts_embedding.weight.unsqueeze(0)  # (1, 20, 512), 20代表每个instance的pt数量
+            map_instance_embeds = self.map_instance_embedding.weight.unsqueeze(1)  # (100, 1, 512), 100代表instance数量
+            map_query_embeds = (map_pts_embeds + map_instance_embeds).flatten(0, 1).to(dtype)  # (100 * 20, 512)
 
-        bev_queries = self.bev_embedding.weight.to(dtype)
-
-        bev_mask = torch.zeros((bs, self.bev_h, self.bev_w),
-                               device=bev_queries.device).to(dtype)
-        bev_pos = self.positional_encoding(bev_mask).to(dtype)
+        bev_queries = self.bev_embedding.weight.to(dtype)  # (100 * 100, 256), 100, 100 分别代表BEV特征平面的长和宽
+        bev_mask = torch.zeros((bs, self.bev_h, self.bev_w), device=bev_queries.device).to(dtype)
+        bev_pos = self.positional_encoding(bev_mask).to(dtype)  # (bs, 256, 100, 100), 把不同的grid位置映射到一个高维的向量空间
 
         if only_bev:  # only use encoder to obtain BEV features, TODO: refine the workaround
             return self.transformer.get_bev_features(
@@ -672,9 +670,7 @@ class VADHead(DETRHead):
         # map_hs: map_query
         # map_init_reference: reference points init
         # map_inter_references: reference points processing
-
-        bev_embed, hs, init_reference, inter_references, \
-        map_hs, map_init_reference, map_inter_references = outputs
+        bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
 
         hs = hs.permute(0, 2, 1, 3)
         outputs_classes = []
@@ -705,12 +701,9 @@ class VADHead(DETRHead):
             outputs_coords_bev.append(tmp[..., 0:2].clone().detach())
             tmp[..., 4:5] = tmp[..., 4:5] + reference[..., 2:3]
             tmp[..., 4:5] = tmp[..., 4:5].sigmoid()
-            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] -
-                                              self.pc_range[0]) + self.pc_range[0])
-            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] -
-                                              self.pc_range[1]) + self.pc_range[1])
-            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] -
-                                              self.pc_range[2]) + self.pc_range[2])
+            tmp[..., 0:1] = (tmp[..., 0:1] * (self.pc_range[3] - self.pc_range[0]) + self.pc_range[0])
+            tmp[..., 1:2] = (tmp[..., 1:2] * (self.pc_range[4] - self.pc_range[1]) + self.pc_range[1])
+            tmp[..., 4:5] = (tmp[..., 4:5] * (self.pc_range[5] - self.pc_range[2]) + self.pc_range[2])
 
             # TODO: check if using sigmoid
             outputs_coord = tmp
@@ -737,8 +730,7 @@ class VADHead(DETRHead):
             map_outputs_coords.append(map_outputs_coord)
             map_outputs_pts_coords.append(map_outputs_pts_coord)
 
-        # motion prediction
-
+        ## motion prediction
         # motion query
         if self.motion_decoder is not None:
             batch_size, num_agent = outputs_coords_bev[-1].shape[:2]

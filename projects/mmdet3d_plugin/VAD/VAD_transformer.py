@@ -16,8 +16,7 @@ from projects.mmdet3d_plugin.VAD.modules.temporal_self_attention import Temporal
 from projects.mmdet3d_plugin.VAD.modules.spatial_cross_attention import MSDeformableAttention3D
 
 
-ext_module = ext_loader.load_ext(
-    '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
+ext_module = ext_loader.load_ext('_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
 
 def inverse_sigmoid(x, eps=1e-5):
     """Inverse function of sigmoid.
@@ -211,7 +210,7 @@ class VADPerceptionTransformer(BaseModule):
     # @auto_fp16(apply_to=('mlvl_feats', 'bev_queries', 'prev_bev', 'bev_pos'))
     def get_bev_features(
             self,
-            mlvl_feats,
+            mlvl_feats,  # 多层特征图
             bev_queries,
             bev_h,
             bev_w,
@@ -227,27 +226,24 @@ class VADPerceptionTransformer(BaseModule):
         bev_queries = bev_queries.unsqueeze(1).repeat(1, bs, 1)
         bev_pos = bev_pos.flatten(2).permute(2, 0, 1)
 
+        ## shift参数的生成 
         # obtain rotation angle and shift with ego motion
-        delta_x = np.array([each['can_bus'][0]
-                           for each in kwargs['img_metas']])
-        delta_y = np.array([each['can_bus'][1]
-                           for each in kwargs['img_metas']])
-        ego_angle = np.array(
-            [each['can_bus'][-2] / np.pi * 180 for each in kwargs['img_metas']])
+        delta_x = np.array([each['can_bus'][0] for each in kwargs['img_metas']])
+        delta_y = np.array([each['can_bus'][1] for each in kwargs['img_metas']])
+        ego_angle = np.array([each['can_bus'][-2] / np.pi * 180 for each in kwargs['img_metas']])
         grid_length_y = grid_length[0]
         grid_length_x = grid_length[1]
         translation_length = np.sqrt(delta_x ** 2 + delta_y ** 2)
         translation_angle = np.arctan2(delta_y, delta_x) / np.pi * 180
         bev_angle = ego_angle - translation_angle
-        shift_y = translation_length * \
-            np.cos(bev_angle / 180 * np.pi) / grid_length_y / bev_h
-        shift_x = translation_length * \
-            np.sin(bev_angle / 180 * np.pi) / grid_length_x / bev_w
+        # 车辆在真实世界的偏移量转换为在BEV空间上的偏移量
+        shift_y = translation_length * np.cos(bev_angle / 180 * np.pi) / grid_length_y / bev_h
+        shift_x = translation_length * np.sin(bev_angle / 180 * np.pi) / grid_length_x / bev_w
         shift_y = shift_y * self.use_shift
         shift_x = shift_x * self.use_shift
-        shift = bev_queries.new_tensor(
-            [shift_x, shift_y]).permute(1, 0)  # xy, bs -> bs, xy
+        shift = bev_queries.new_tensor([shift_x, shift_y]).permute(1, 0)  # (xy, bs) -> (bs, xy)
 
+        # BEV 特征的对齐: 通过"旋转"和"平移"变换实现，对于平移部分是通过对参考点加上偏移量"shift"体现的
         if prev_bev is not None:
             if prev_bev.shape[1] == bev_h * bev_w:
                 prev_bev = prev_bev.permute(1, 0, 2)
@@ -257,44 +253,41 @@ class VADPerceptionTransformer(BaseModule):
                     rotation_angle = kwargs['img_metas'][i]['can_bus'][-1]
                     tmp_prev_bev = prev_bev[:, i].reshape(
                         bev_h, bev_w, -1).permute(2, 0, 1)
-                    tmp_prev_bev = rotate(tmp_prev_bev, rotation_angle,
-                                          center=self.rotate_center)
-                    tmp_prev_bev = tmp_prev_bev.permute(1, 2, 0).reshape(
-                        bev_h * bev_w, 1, -1)
+                    tmp_prev_bev = rotate(tmp_prev_bev, rotation_angle, center=self.rotate_center)
+                    tmp_prev_bev = tmp_prev_bev.permute(1, 2, 0).reshape(bev_h * bev_w, 1, -1)
                     prev_bev[:, i] = tmp_prev_bev[:, 0]
 
         # add can bus signals
-        can_bus = bev_queries.new_tensor(
-            [each['can_bus'] for each in kwargs['img_metas']])  # [:, :]
+        can_bus = bev_queries.new_tensor([each['can_bus'] for each in kwargs['img_metas']])  # [:, :]
         can_bus = self.can_bus_mlp(can_bus)[None, :, :]
         bev_queries = bev_queries + can_bus * self.use_can_bus
 
         feat_flatten = []
         spatial_shapes = []
+        # 首先将多尺度的特征每一层都进行flatten
         for lvl, feat in enumerate(mlvl_feats):
             bs, num_cam, c, h, w = feat.shape
             spatial_shape = (h, w)
             feat = feat.flatten(3).permute(1, 0, 3, 2)
             if self.use_cams_embeds:
                 feat = feat + self.cams_embeds[:, None, None, :].to(feat.dtype)
-            feat = feat + self.level_embeds[None,
-                                            None, lvl:lvl + 1, :].to(feat.dtype)
+            feat = feat + self.level_embeds[None, None, lvl:lvl + 1, :].to(feat.dtype)
             spatial_shapes.append(spatial_shape)
             feat_flatten.append(feat)
 
+        # 对每个camera的所有层级特征进行聚合
         feat_flatten = torch.cat(feat_flatten, 2)
-        spatial_shapes = torch.as_tensor(
-            spatial_shapes, dtype=torch.long, device=bev_pos.device)
-        level_start_index = torch.cat((spatial_shapes.new_zeros(
-            (1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
+        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=bev_pos.device)
 
-        feat_flatten = feat_flatten.permute(
-            0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims)
+        # 计算每层特征的起始索引位置
+        level_start_index = torch.cat((spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
+        
+        feat_flatten = feat_flatten.permute(0, 2, 1, 3)  # (num_cam, H*W, bs, embed_dims)
 
         bev_embed = self.encoder(
-            bev_queries,
-            feat_flatten,
-            feat_flatten,
+            bev_queries,  # q
+            feat_flatten, # k
+            feat_flatten, # v
             bev_h=bev_h,
             bev_w=bev_w,
             bev_pos=bev_pos,
@@ -372,16 +365,14 @@ class VADPerceptionTransformer(BaseModule):
             **kwargs)  # bev_embed shape: bs, bev_h*bev_w, embed_dims
 
         bs = mlvl_feats[0].size(0)
-        query_pos, query = torch.split(
-            object_query_embed, self.embed_dims, dim=1)
+        query_pos, query = torch.split(object_query_embed, self.embed_dims, dim=1)
         query_pos = query_pos.unsqueeze(0).expand(bs, -1, -1)
         query = query.unsqueeze(0).expand(bs, -1, -1)
         reference_points = self.reference_points(query_pos)
         reference_points = reference_points.sigmoid()
         init_reference_out = reference_points
 
-        map_query_pos, map_query = torch.split(
-            map_query_embed, self.embed_dims, dim=1)
+        map_query_pos, map_query = torch.split(map_query_embed, self.embed_dims, dim=1)
         map_query_pos = map_query_pos.unsqueeze(0).expand(bs, -1, -1)
         map_query = map_query.unsqueeze(0).expand(bs, -1, -1)
         map_reference_points = self.map_reference_points(map_query_pos)
@@ -430,9 +421,8 @@ class VADPerceptionTransformer(BaseModule):
             map_inter_states = map_query.unsqueeze(0)
             map_inter_references_out = map_reference_points.unsqueeze(0)
 
-        return (
-            bev_embed, inter_states, init_reference_out, inter_references_out,
-            map_inter_states, map_init_reference_out, map_inter_references_out)
+        return (bev_embed, inter_states, init_reference_out, inter_references_out, map_inter_states, 
+                map_init_reference_out, map_inter_references_out)
 
 
 @TRANSFORMER_LAYER_SEQUENCE.register_module()
