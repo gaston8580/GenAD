@@ -762,7 +762,7 @@ if __name__ == '__main__':
     sample_token_list = list(bevformer_results['results'].keys())
 
     nusc = NuScenes(version='v1.0-trainval', dataroot='./data/nuscenes', verbose=True)
-    # nusc = NuScenes(version='v1.0-mini', dataroot='./data/nuscenes', verbose=True)
+    # nusc = NuScenes(version='v1.0-mini', dataroot='./data/nuscenes_mini', verbose=True)
     
     imgs = []
     fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
@@ -773,6 +773,11 @@ if __name__ == '__main__':
         #3025 1140
         # id = id + 3025
         mmcv.mkdir_or_exist(out_path)
+        sample_token = sample_token_list[id]
+        try:
+            sample = nusc.get('sample', sample_token)
+        except Exception as e:
+            continue
         render_sample_data(sample_token_list[id],
                            pred_data=bevformer_results,
                            out_path=out_path)
@@ -780,8 +785,6 @@ if __name__ == '__main__':
         pred_img = cv2.imread(pred_path)
         os.remove(pred_path)
 
-        sample_token = sample_token_list[id]
-        sample = nusc.get('sample', sample_token)
         # sample = data['results'][sample_token_list[0]][0]
         cams = [
             'CAM_FRONT_LEFT',

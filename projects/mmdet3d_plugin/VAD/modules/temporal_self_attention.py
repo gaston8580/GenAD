@@ -135,34 +135,21 @@ class TemporalSelfAttention(BaseModule):
         """Forward Function of MultiScaleDeformAttention.
 
         Args:
-            query (Tensor): Query of Transformer with shape
-                (num_query, bs, embed_dims).
-            key (Tensor): The key tensor with shape
-                `(num_key, bs, embed_dims)`.
-            value (Tensor): The value tensor with shape
-                `(num_key, bs, embed_dims)`.
-            identity (Tensor): The tensor used for addition, with the
-                same shape as `query`. Default None. If None,
+            query (Tensor): Query of Transformer with shape (num_query, bs, embed_dims).
+            key (Tensor): The key tensor with shape `(num_key, bs, embed_dims)`.
+            value (Tensor): The value tensor with shape `(num_key, bs, embed_dims)`.
+            identity (Tensor): The tensor used for addition, with the same shape as `query`. Default None. If None,
                 `query` will be used.
-            query_pos (Tensor): The positional encoding for `query`.
-                Default: None.
-            key_pos (Tensor): The positional encoding for `key`. Default
-                None.
-            reference_points (Tensor):  The normalized reference
-                points with shape (bs, num_query, num_levels, 2),
-                all elements is range in [0, 1], top-left (0,0),
-                bottom-right (1, 1), including padding area.
-                or (N, Length_{query}, num_levels, 4), add
-                additional two dimensions is (w, h) to
-                form reference boxes.
-            key_padding_mask (Tensor): ByteTensor for `query`, with
-                shape [bs, num_key].
-            spatial_shapes (Tensor): Spatial shape of features in
-                different levels. With shape (num_levels, 2),
+            query_pos (Tensor): The positional encoding for `query`. Default: None.
+            key_pos (Tensor): The positional encoding for `key`. Default None.
+            reference_points (Tensor):  The normalized reference points with shape (bs, num_query, num_levels, 2),
+                all elements is range in [0, 1], top-left (0,0), bottom-right (1, 1), including padding area.
+                or (N, Length_{query}, num_levels, 4), add additional two dimensions is (w, h) to form reference boxes.
+            key_padding_mask (Tensor): ByteTensor for `query`, with shape [bs, num_key].
+            spatial_shapes (Tensor): Spatial shape of features in different levels. With shape (num_levels, 2),
                 last dimension represents (h, w).
-            level_start_index (Tensor): The start index of each level.
-                A tensor has shape ``(num_levels, )`` and can be represented
-                as [0, h_0*w_0, h_0*w_0+h_1*w_1, ...].
+            level_start_index (Tensor): The start index of each level. A tensor has shape ``(num_levels, )`` and can 
+                be represented as [0, h_0*w_0, h_0*w_0+h_1*w_1, ...].
 
         Returns:
              Tensor: forwarded results with shape [num_query, bs, embed_dims].
@@ -172,7 +159,6 @@ class TemporalSelfAttention(BaseModule):
             assert self.batch_first
             bs, len_bev, c = query.shape
             value = torch.stack([query, query], 1).reshape(bs*2, len_bev, c)
-
             # value = torch.cat([query, query], 0)
 
         if identity is None:
@@ -194,20 +180,17 @@ class TemporalSelfAttention(BaseModule):
         if key_padding_mask is not None:
             value = value.masked_fill(key_padding_mask[..., None], 0.0)
 
-        value = value.reshape(bs*self.num_bev_queue,
-                              num_value, self.num_heads, -1)
+        value = value.reshape(bs*self.num_bev_queue, num_value, self.num_heads, -1)
 
-        sampling_offsets = self.sampling_offsets(query)
-        sampling_offsets = sampling_offsets.view(
-            bs, num_query, self.num_heads,  self.num_bev_queue, self.num_levels, self.num_points, 2)
-        attention_weights = self.attention_weights(query).view(
-            bs, num_query,  self.num_heads, self.num_bev_queue, self.num_levels * self.num_points)
-        attention_weights = attention_weights.softmax(-1)
+        sampling_offsets = self.sampling_offsets(query)  # 对 query 进行维度映射得到采样点的偏移量
+        sampling_offsets = sampling_offsets.view(bs, num_query, self.num_heads,  self.num_bev_queue, self.num_levels, 
+                                                 self.num_points, 2)  # (bs, num_query, 8, 1, 4, 2)
+        # 对 query 进行维度映射得到注意力权重
+        attention_weights = self.attention_weights(query).view(bs, num_query,  self.num_heads, self.num_bev_queue, 
+                                                               self.num_levels * self.num_points)
+        attention_weights = attention_weights.softmax(-1)  # 得到权重比例
 
-        attention_weights = attention_weights.view(bs, num_query,
-                                                   self.num_heads,
-                                                   self.num_bev_queue,
-                                                   self.num_levels,
+        attention_weights = attention_weights.view(bs, num_query, self.num_heads, self.num_bev_queue, self.num_levels,
                                                    self.num_points)
 
         attention_weights = attention_weights.permute(0, 3, 1, 2, 4, 5)\
@@ -215,37 +198,36 @@ class TemporalSelfAttention(BaseModule):
         sampling_offsets = sampling_offsets.permute(0, 3, 1, 2, 4, 5, 6)\
             .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points, 2)
 
+        # TODO: CHECK sampling_offsets归一化方式是否合理, 20240808
         if reference_points.shape[-1] == 2:
-            offset_normalizer = torch.stack(
-                [spatial_shapes[..., 1], spatial_shapes[..., 0]], -1)
-            sampling_locations = reference_points[:, :, None, :, None, :] \
-                + sampling_offsets \
-                / offset_normalizer[None, None, None, :, None, :]
-
+            """ sample location 的生成过程 
+            通过代码可以观察到两点：
+            1. 通过 query 学到的 sampling_offsets 偏移量是一个绝对量，不是相对量，所以需要做 normalize;
+            2. 最终生成的 sampling_locations 是一个相对量；
+            """
+            offset_normalizer = torch.stack([spatial_shapes[..., 1], spatial_shapes[..., 0]], -1)
+            sampling_locations = reference_points[:, :, None, :, None, :] + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
         elif reference_points.shape[-1] == 4:
-            sampling_locations = reference_points[:, :, None, :, None, :2] \
-                + sampling_offsets / self.num_points \
-                * reference_points[:, :, None, :, None, 2:] \
-                * 0.5
+            sampling_locations = reference_points[:, :, None, :, None, :2] + sampling_offsets / self.num_points \
+                * reference_points[:, :, None, :, None, 2:] * 0.5
         else:
-            raise ValueError(
-                f'Last dim of reference_points must be'
-                f' 2 or 4, but get {reference_points.shape[-1]} instead.')
-        if torch.cuda.is_available() and value.is_cuda:
-
+            raise ValueError(f'Last dim of reference_points must be' f' 2 or 4, but get {reference_points.shape[-1]} instead.')
+        
+        
+        # value: (2, 40000, 8, 32), 2: 代表前一时刻的 BEV 特征和后一时刻的 BEV 特征，两个特征在计算的过程中是互不干扰的;
+        # 40000: 代表 bev_query 200 * 200 空间大小的每个位置; 8: 代表8个头; 32: 每个头表示为 32 维的特征。
+        # level_start_index: 0, BEV 特征只有一层
+        use_msda_cuda = True
+        if torch.cuda.is_available() and value.is_cuda and use_msda_cuda:
             # using fp16 deformable attention is unstable because it performs many sum operations
             if value.dtype == torch.float16:
                 MultiScaleDeformableAttnFunction = MultiScaleDeformableAttnFunction_fp32
             else:
                 MultiScaleDeformableAttnFunction = MultiScaleDeformableAttnFunction_fp32
-            output = MultiScaleDeformableAttnFunction.apply(
-                value, spatial_shapes, level_start_index, sampling_locations,
-                attention_weights, self.im2col_step)
+            output = MultiScaleDeformableAttnFunction.apply(value, spatial_shapes, level_start_index, sampling_locations,
+                                                            attention_weights, self.im2col_step)
         else:
-
-            output = multi_scale_deformable_attn_pytorch(
-                value, spatial_shapes, sampling_locations, attention_weights)
-
+            output = multi_scale_deformable_attn_pytorch(value, spatial_shapes, sampling_locations, attention_weights)
         # output shape (bs*num_bev_queue, num_query, embed_dims)
         # (bs*num_bev_queue, num_query, embed_dims)-> (num_query, embed_dims, bs*num_bev_queue)
         output = output.permute(1, 2, 0)

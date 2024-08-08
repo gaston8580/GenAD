@@ -672,14 +672,14 @@ class VADHead(DETRHead):
         # map_inter_references: reference points processing
         bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
 
-        hs = hs.permute(0, 2, 1, 3)
+        hs = hs.permute(0, 2, 1, 3)  # agent_query
         outputs_classes = []
         outputs_coords = []
         outputs_coords_bev = []
         outputs_trajs = []
         outputs_trajs_classes = []
 
-        map_hs = map_hs.permute(0, 2, 1, 3)
+        map_hs = map_hs.permute(0, 2, 1, 3)  # map_query
         map_outputs_classes = []
         map_outputs_coords = []
         map_outputs_pts_coords = []
@@ -716,9 +716,7 @@ class VADHead(DETRHead):
             else:
                 reference = map_inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
-            map_outputs_class = self.map_cls_branches[lvl](
-                map_hs[lvl].view(bs, self.map_num_vec, self.map_num_pts_per_vec, -1).mean(2)
-            )
+            map_outputs_class = self.map_cls_branches[lvl](map_hs[lvl].view(bs, self.map_num_vec, self.map_num_pts_per_vec, -1).mean(2))
             tmp = self.map_reg_branches[lvl](map_hs[lvl])
             # TODO: check the shape of reference
             assert reference.shape[-1] == 2
