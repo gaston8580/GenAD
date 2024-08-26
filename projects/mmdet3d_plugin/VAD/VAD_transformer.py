@@ -450,12 +450,10 @@ class CustomTransformerDecoder(TransformerLayerSequence):
                 **kwargs):
         """Forward function for `Detr3DTransformerDecoder`.
         Args:
-            query (Tensor): Input query with shape
-                `(num_query, bs, embed_dims)`.
+            query (Tensor): Input query with shape `(num_query, bs, embed_dims)`.
         Returns:
-            Tensor: Results with shape [1, num_query, bs, embed_dims] when
-                return_intermediate is `False`, otherwise it has shape
-                [num_layers, num_query, bs, embed_dims].
+            Tensor: Results with shape [1, num_query, bs, embed_dims] when return_intermediate is `False`, 
+                otherwise it has shape [num_layers, num_query, bs, embed_dims].
         """
         intermediate = []
         for lid, layer in enumerate(self.layers):

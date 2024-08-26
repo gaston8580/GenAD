@@ -672,14 +672,14 @@ class VADHead(DETRHead):
         # map_inter_references: reference points processing
         bev_embed, hs, init_reference, inter_references, map_hs, map_init_reference, map_inter_references = outputs
 
-        hs = hs.permute(0, 2, 1, 3)  # agent_query
+        hs = hs.permute(0, 2, 1, 3)  # agent_query, (3, bs, 300, 256)
         outputs_classes = []
         outputs_coords = []
         outputs_coords_bev = []
         outputs_trajs = []
         outputs_trajs_classes = []
 
-        map_hs = map_hs.permute(0, 2, 1, 3)  # map_query
+        map_hs = map_hs.permute(0, 2, 1, 3)  # map_query, (3, bs, 2000, 256)
         map_outputs_classes = []
         map_outputs_coords = []
         map_outputs_pts_coords = []
@@ -687,14 +687,15 @@ class VADHead(DETRHead):
 
         for lvl in range(hs.shape[0]):
             if lvl == 0:
-                reference = init_reference
+                reference = init_reference  # (bs, 300, 3)
             else:
                 reference = inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
-            outputs_class = self.cls_branches[lvl](hs[lvl])
-            tmp = self.reg_branches[lvl](hs[lvl])
+            outputs_class = self.cls_branches[lvl](hs[lvl])  # 每个agent的预测类别，(bs, 300, 10)
+            tmp = self.reg_branches[lvl](hs[lvl])  # 每个agent的预测坐标，(bs, 300, 10)
 
             # TODO: check the shape of reference
+            # pc_range: [xmin, ymin, zmin, xmax, ymax, zmax], 故tmp[0]为x, tmp[1]为y, tmp[4]为z
             assert reference.shape[-1] == 3
             tmp[..., 0:2] = tmp[..., 0:2] + reference[..., 0:2]
             tmp[..., 0:2] = tmp[..., 0:2].sigmoid()
@@ -716,8 +717,9 @@ class VADHead(DETRHead):
             else:
                 reference = map_inter_references[lvl - 1]
             reference = inverse_sigmoid(reference)
+            # 每个map polyline的预测类别，(bs, 100, 3)
             map_outputs_class = self.map_cls_branches[lvl](map_hs[lvl].view(bs, self.map_num_vec, self.map_num_pts_per_vec, -1).mean(2))
-            tmp = self.map_reg_branches[lvl](map_hs[lvl])
+            tmp = self.map_reg_branches[lvl](map_hs[lvl])  # 每个map point的预测坐标，(bs, 2000, 2)
             # TODO: check the shape of reference
             assert reference.shape[-1] == 2
             tmp[..., 0:2] += reference[..., 0:2]
@@ -927,8 +929,7 @@ class VADHead(DETRHead):
         Returns:
             The bbox [cx, cy, w, h] transformed from points.
         """
-        pts_reshape = pts.view(pts.shape[0], self.map_num_vec,
-                               self.map_num_pts_per_vec, 2)
+        pts_reshape = pts.view(pts.shape[0], self.map_num_vec, self.map_num_pts_per_vec, 2)
         pts_y = pts_reshape[:, :, :, 0] if y_first else pts_reshape[:, :, :, 1]
         pts_x = pts_reshape[:, :, :, 1] if y_first else pts_reshape[:, :, :, 0]
         if self.map_transform_method == 'minmax':
